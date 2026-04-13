@@ -1068,8 +1068,15 @@ static int bufferOpenFile(editorBuffer *B, const char *filename) {
     historyClear(B);
 
     free(B->filename);
-    B->filename = filename ? xstrdup(filename) : NULL;
-    editorSelectSyntaxHighlight(B, B->filename);
+    B->filename = NULL;
+
+    if (filename && filename[0] && strlen(filename) < PATH_MAX) {
+        B->filename = xstrdup(filename);
+        editorSelectSyntaxHighlight(B, B->filename);
+    } else {
+        B->filename = NULL;
+        editorSelectSyntaxHighlight(B, NULL);
+    }
 
     if (!filename) {
         B->history_save = 0;
@@ -1759,9 +1766,20 @@ static int editorLoadSession(void) {
 
         while (fgets(line, sizeof(line), fp)) {
             if (strncmp(line, "ENDTAB", 6) == 0) break;
-            if (strncmp(line, "filename=", 9) == 0) {
-                snprintf(filename, sizeof(filename), "%s", line + 9);
-                filename[strcspn(filename, "\r\n")] = '\0';
+            else if (strncmp(line, "filename=", 9) == 0) {
+                const char *val = line + 9;
+                size_t len = strcspn(val, "\r\n");
+                if (len > 0 && len < sizeof(filename)) {
+                    memcpy(filename, val, len);
+                    filename[len] = '\0';
+
+                    /* Reject garbage / binary / overlong names */
+                    if (strchr(filename, '\0') != filename + len || strlen(filename) != len) {
+                        filename[0] = '\0';
+                    }
+                } else {
+                    filename[0] = '\0';
+                }
             } else if (strncmp(line, "dirty=", 6) == 0) dirty = atoi(line + 6);
             else if (strncmp(line, "cx=", 3) == 0) cx = atoi(line + 3);
             else if (strncmp(line, "cy=", 3) == 0) cy = atoi(line + 3);
