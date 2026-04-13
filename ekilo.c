@@ -1140,20 +1140,22 @@ static int bufferOpenFile(editorBuffer *B, const char *filename) {
 static int bufferSaveToFilename(editorBuffer *B, const char *filename) {
     if (!filename || !*filename) return 1;
 
+    char *newname = xstrdup(filename);   /* copy first to avoid aliasing */
+
     int len;
     char *buf = bufferRowsToString(B, &len);
 
     int fd = open(filename, O_RDWR | O_CREAT, 0644);
-    if (fd == -1) { free(buf); return 1; }
+    if (fd == -1) { free(buf); free(newname); return 1; }
 
-    if (ftruncate(fd, len) == -1) { close(fd); free(buf); return 1; }
+    if (ftruncate(fd, len) == -1) { close(fd); free(buf); free(newname); return 1; }
     ssize_t w = write(fd, buf, (size_t)len);
     close(fd);
     free(buf);
-    if (w != len) return 1;
+    if (w != len) { free(newname); return 1; }
 
     free(B->filename);
-    B->filename = xstrdup(filename);
+    B->filename = newname;
     editorSelectSyntaxHighlight(B, B->filename);
 
     B->history_save = B->hist_index;
