@@ -232,12 +232,14 @@ static void die(const char *s) {
 }
 
 static void *xmalloc(size_t n) {
+    if (n == 0) n = 1;
     void *p = malloc(n);
     if (!p) die("malloc");
     return p;
 }
 
 static void *xrealloc(void *p, size_t n) {
+    if (n == 0) n = 1;
     void *q = realloc(p, n);
     if (!q) die("realloc");
     return q;
@@ -291,16 +293,15 @@ static int enableRawMode(int fd) {
 
 static int editorReadKey(int fd) {
     int nread;
-    char c;
+    unsigned char c;                    // <--- unsigned
     while ((nread = read(fd, &c, 1)) == 0) {}
     if (nread == -1) die("read");
 
     if (c == ESC) {
-        char seq[4];
+        unsigned char seq[5];          // <--- unsigned
         if (read(fd, &seq[0], 1) == 0) return ESC;
         if (read(fd, &seq[1], 1) == 0) return ESC;
 
-        /* xterm F1: ESCOP, sometimes ESC[11~ */
         if (seq[0] == 'O') {
             switch (seq[1]) {
                 case 'H': return HOME_KEY;
@@ -323,12 +324,15 @@ static int editorReadKey(int fd) {
                         case '7': return HOME_KEY;
                         case '8': return END_KEY;
                     }
-                } else if (seq[1] == '1') {
-                    /* try F1: ESC[11~ */
-                    if (seq[2] == '1') {
-                        if (read(fd, &seq[3], 1) == 0) return ESC;
-                        if (seq[3] == '~') return KEY_F1;
-                    }
+                } else if (seq[1] == '1' && seq[2] == '1') {
+                    if (read(fd, &seq[3], 1) == 0) return ESC;
+                    if (seq[3] == '~') return KEY_F1;
+                }
+                // --- bracketed paste [200~ / [201~  : consume and ignore ---
+                if (seq[1] == '2' && seq[2] == '0') {
+                    unsigned char d;
+                    while (read(fd, &d, 1) == 1 && d != '~') {}
+                    return editorReadKey(fd); // get next real key
                 }
             } else {
                 switch (seq[1]) {
@@ -341,10 +345,9 @@ static int editorReadKey(int fd) {
                 }
             }
         }
-
         return ESC;
     }
-    return c;
+    return c;   // 0-255
 }
 
 static int getCursorPosition(int ifd, int ofd, int *rows, int *cols) {
@@ -1171,7 +1174,7 @@ static char *editorPrompt(const char *prompt, void (*callback)(char *, int)) {
             if (callback) callback(buf, c);
             editorSetStatusMessage("");
             return buf;
-        } else if (!iscntrl(c) && c < 128) {
+        } else if (!iscntrl((unsigned char)c) && (unsigned char)c < 128) {
             if (buflen + 1 >= bufsize) {
                 bufsize *= 2;
                 buf = xrealloc(buf, bufsize);
@@ -2790,7 +2793,7 @@ static void editorProcessKeypress(int fd) {
         default:
             if (c == '\t') {
                 editorInsertCharAutoPairWithHistory(B, '\t');
-            } else if (!iscntrl(c) && c < 128) {
+            } else if ((unsigned char)c >= 32) {   // <--- was !iscntrl(c) && c < 128
                 editorInsertCharAutoPairWithHistory(B, c);
             }
             break;
