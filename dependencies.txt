@@ -1,0 +1,3 @@
+Linux Utilities:
+	xclip
+	dialog

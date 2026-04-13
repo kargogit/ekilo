@@ -24,6 +24,8 @@
 #include <regex.h>
 #include <limits.h>
 
+#include <sys/wait.h>
+
 /* =========================== Syntax highlight types ======================= */
 #define HL_NORMAL 0
 #define HL_NONPRINT 1
@@ -2335,9 +2337,84 @@ static void editorAtExit(void) {
 }
 
 /* =============================== Commands ================================= */
+static char *editorOpenFileMenuDialog(void) {
+    char start[PATH_MAX];
+    if (!getcwd(start, sizeof(start))) {
+        snprintf(start, sizeof(start), "./");
+    }
+    size_t sl = strlen(start);
+    if (sl > 0 && start[sl - 1] != '/' && sl + 1 < sizeof(start)) {
+        start[sl] = '/';
+        start[sl + 1] = '\0';
+    }
+
+    int pfd[2];
+    if (pipe(pfd) == -1) return NULL;
+
+    disableRawMode(STDIN_FILENO);
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        enableRawMode(STDIN_FILENO);
+        close(pfd[0]);
+        close(pfd[1]);
+        return NULL;
+    }
+
+    if (pid == 0) {
+        /* child: dialog writes selection to stdout -> pipe */
+        dup2(pfd[1], STDOUT_FILENO);
+        close(pfd[0]);
+        close(pfd[1]);
+
+        execlp("dialog", "dialog",
+               "--stdout",
+               "--title", "Open file",
+               "--fselect", start,
+               "20", "80",
+               (char *)NULL);
+        _exit(127); /* dialog not found */
+    }
+
+    /* parent: read selected path */
+    close(pfd[1]);
+
+    char out[PATH_MAX + 1];
+    int len = 0;
+    while (len < PATH_MAX) {
+        ssize_t n = read(pfd[0], out + len, (size_t)(PATH_MAX - len));
+        if (n <= 0) break;
+        len += (int)n;
+    }
+    close(pfd[0]);
+
+    int status = 0;
+    (void)waitpid(pid, &status, 0);
+
+    enableRawMode(STDIN_FILENO);
+
+    /* clean up dialog screen artifacts */
+    write(STDOUT_FILENO, "\x1b[2J\x1b[H", 7);
+    updateWindowSize();
+
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return NULL; /* cancel/ESC/not found */
+    if (len <= 0) return NULL;
+
+    out[len] = '\0';
+    out[strcspn(out, "\r\n")] = '\0';
+    if (!out[0]) return NULL;
+
+    return xstrdup(out);
+}
+
 static void editorOpenPromptNewTab(void) {
-    char *fname = editorPrompt("Open file: %s  (ESC cancels)", NULL);
+    /* 1) try terminal file menu */
+    char *fname = editorOpenFileMenuDialog();
+
+    /* 2) fallback to old prompt */
+    if (!fname) fname = editorPrompt("Open file: %s  (ESC cancels)", NULL);
     if (!fname) return;
+
     editorTabNew(fname, 1);
     free(fname);
 }
