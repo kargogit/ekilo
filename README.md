@@ -24,40 +24,49 @@ eKilo is a heavily enhanced fork of [antirez/kilo](https://github.com/antirez/ki
 ## Keyboard Shortcuts
 
 ### Global & Help
-| Key               | Action                          |
-|-------------------|---------------------------------|
-| `F1` or `Ctrl-/`  | Toggle help (scrollable)        |
-| `Ctrl-Q`          | Quit (3× if unsaved changes)    |
-| `Ctrl-L`          | Refresh screen                  |
+| Key                    | Action                                           |
+|------------------------|--------------------------------------------------|
+| `F1` or `Ctrl-/`       | Toggle help (scrollable with arrows/PgUp/PgDn)  |
+| `Ctrl-Q`               | Quit (press 3× if any tabs have unsaved changes)|
+| `Ctrl-L`               | Refresh screen                                   |
+| `ESC`                  | Cancel prompt / close help                       |
 
 ### Files & Tabs
-| Key               | Action                              |
-|-------------------|-------------------------------------|
-| `Ctrl-S`          | Save (prompts for name if unnamed)  |
-| `Ctrl-O`          | Open file in new tab                |
-| `Ctrl-T`          | New empty tab                       |
-| `Ctrl-N` / `Ctrl-P` | Next / Previous tab               |
-| `Ctrl-W`          | Close tab (2× if modified)          |
+| Key                    | Action                                           |
+|------------------------|--------------------------------------------------|
+| `Ctrl-S`               | Save current tab (prompts for name if unnamed)  |
+| `Ctrl-O`               | Open file in new tab                             |
+| `Ctrl-T`               | New empty tab                                    |
+| `Ctrl-N` / `Ctrl-P`    | Next / Previous tab                              |
+| `Ctrl-W`               | Close current tab (press twice if modified)      |
 
-### Navigation & Editing
-| Key                    | Action                              |
-|------------------------|-------------------------------------|
-| Arrow keys / `Home` / `End` | Standard movement               |
-| `PgUp` / `PgDn`        | Page scrolling                      |
-| `Ctrl-G`               | Go to line (`42`, `+10`, `-5`, `42:8`) |
-| `Ctrl-\`               | Toggle line numbers                 |
-| `Ctrl-Z` / `Ctrl-Y`    | Undo / Redo                         |
-| `Ctrl-H`               | Delete current line                 |
-| `Tab`                  | Insert tab (respects auto-pairing)  |
+### Navigation
+| Key                        | Action                                              |
+|----------------------------|-----------------------------------------------------|
+| Arrow keys / `Home` / `End`| Move cursor / start or end of line                  |
+| `PgUp` / `PgDn`            | Page scrolling                                      |
+| `Ctrl-G`                   | Go to line (`42`, `+10`, `-5`, `42:8` supported)   |
+
+### Editing
+| Key                    | Action                                              |
+|------------------------|-----------------------------------------------------|
+| `Enter`                | Insert newline                                      |
+| `Backspace`            | Delete character before cursor                      |
+| `Delete`               | Delete character after cursor                       |
+| `Tab`                  | Insert tab character                                |
+| `Ctrl-Z` / `Ctrl-Y`    | Undo / Redo (smart merging of typing)               |
+| `Ctrl-H`               | Delete current line                                 |
+| `Ctrl-A`               | Select all                                          |
+| `Ctrl-C`               | Copy selection to system clipboard                  |
 
 ### Search & Replace
-| Key               | Action                                      |
-|-------------------|---------------------------------------------|
-| `Ctrl-F`          | Find (plain text)                           |
-| `Ctrl-E`          | Find (regex mode)                           |
-| `Ctrl-R`          | Replace all (regex, supports `\0`–`\9`)     |
+| Key               | Action                                                      |
+|-------------------|-------------------------------------------------------------|
+| `Ctrl-F`          | Find (plain text mode)                                      |
+| `Ctrl-E`          | Find (regex mode)                                           |
+| `Ctrl-R`          | Replace all (regex with backreferences `\0`–`\9`)          |
 
-> **Tip:** While in the find prompt, use **arrow keys** to navigate matches. Press `Ctrl-E`/`Ctrl-F` to switch between regex and plain mode on the fly.
+> **Tip:** While in the find prompt, use **arrow keys** to navigate matches. Press `Ctrl-E`/`Ctrl-F` to switch between regex and plain mode on the fly. `ESC` cancels.
 
 ---
 
