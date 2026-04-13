@@ -93,6 +93,7 @@ typedef struct editorBuffer {
     int rx;             /* cursor position in render coords */
     int rowoff;         /* row scroll */
     int coloff;         /* column scroll (render coords) */
+    int sel_anchor_cy, sel_anchor_cx; /* selection anchor; -1 = no selection */
     int numrows;
     erow *row;
 
@@ -134,6 +135,7 @@ struct editorConfig {
 
 static struct editorConfig E;
 static struct termios orig_termios;
+static char *editor_clipboard = NULL;
 
 /* =============================== Key handling ============================= */
 #define CTRL_KEY(k) ((k)&0x1f)
@@ -1548,6 +1550,10 @@ static void bufferInit(editorBuffer *B) {
     memset(B, 0, sizeof(*B));
     B->cx = B->cy = B->rx = 0;
     B->rowoff = B->coloff = 0;
+
+    B->sel_anchor_cy = -1;
+    B->sel_anchor_cx = -1;
+
     B->numrows = 0;
     B->row = NULL;
 
@@ -1904,6 +1910,8 @@ static void editorDrawHelpScreen(struct abuf *ab, int startup) {
         "  Ctrl-H             Delete current line",
         "  Ctrl-Z / Ctrl-Y    Undo / Redo",
         "  Tab                Insert tab character",
+        "  Ctrl-A             Select all",
+        "  Ctrl-C             Copy selection",
         "",
         "Find / Replace",
         "  Ctrl-F             Find (plain text)",
@@ -1981,6 +1989,77 @@ static void editorDrawHelpScreen(struct abuf *ab, int startup) {
     }
 }
 
+static void editorClearSelection(editorBuffer *B) {
+    if (B) B->sel_anchor_cy = -1;
+}
+
+static void editorGetSelectionRange(editorBuffer *B, int filerow, int *start_rx, int *end_rx) {
+    *start_rx = -1;
+    *end_rx = -1;
+    if (!B || B->sel_anchor_cy < 0 || filerow < 0 || filerow >= B->numrows) return;
+    int ay = B->sel_anchor_cy, ax = B->sel_anchor_cx;
+    int by = B->cy, bx = B->cx;
+    if (ay > by || (ay == by && ax > bx)) {
+        int t; t = ay; ay = by; by = t; t = ax; ax = bx; bx = t;
+    }
+    if (filerow < ay || filerow > by) return;
+    erow *row = &B->row[filerow];
+    int scx = (filerow == ay) ? ax : 0;
+    int ecx = (filerow == by) ? bx : row->size;
+    if (scx > row->size) scx = row->size;
+    if (ecx > row->size) ecx = row->size;
+    *start_rx = editorRowCxToRx(row, scx);
+    *end_rx = editorRowCxToRx(row, ecx);
+}
+
+static void clipboardCopyToSystem(const char *text, int len) {
+    const char *cmds[] = {
+        "xclip -selection clipboard",
+        "xsel --clipboard --input",
+        NULL
+    };
+    for (int i = 0; cmds[i]; i++) {
+        FILE *p = popen(cmds[i], "w");
+        if (!p) continue;
+        fwrite(text, 1, (size_t)len, p);
+        if (pclose(p) == 0) return;
+    }
+}
+
+static void editorCopySelection(editorBuffer *B) {
+    if (!B || B->sel_anchor_cy < 0) return;
+    int ay = B->sel_anchor_cy, ax = B->sel_anchor_cx;
+    int by = B->cy, bx = B->cx;
+    if (ay > by || (ay == by && ax > bx)) {
+        int t; t = ay; ay = by; by = t; t = ax; ax = bx; bx = t;
+    }
+    size_t total = 0;
+    for (int r = ay; r <= by && r < B->numrows; r++) {
+        erow *row = &B->row[r];
+        int s = (r == ay) ? ax : 0;
+        int e = (r == by) ? bx : row->size;
+        if (s < 0) s = 0;
+        if (e > row->size) e = row->size;
+        total += (size_t)(e - s);
+        if (r < by) total++;
+    }
+    free(editor_clipboard);
+    editor_clipboard = xmalloc(total + 1);
+    char *p = editor_clipboard;
+    for (int r = ay; r <= by && r < B->numrows; r++) {
+        erow *row = &B->row[r];
+        int s = (r == ay) ? ax : 0;
+        int e = (r == by) ? bx : row->size;
+        if (s < 0) s = 0;
+        if (e > row->size) e = row->size;
+        if (e > s) { memcpy(p, row->chars + s, (size_t)(e - s)); p += (e - s); }
+        if (r < by) *p++ = '\n';
+    }
+    *p = '\0';
+    clipboardCopyToSystem(editor_clipboard, (int)(p - editor_clipboard));
+    editorSetStatusMessage("Copied %d bytes", (int)(p - editor_clipboard));
+}
+
 static void editorRefreshScreen(void) {
     editorBuffer *B = curBuf();
     if (!B) return;
@@ -2056,14 +2135,25 @@ static void editorRefreshScreen(void) {
 
             char *c = r->render + B->coloff;
             unsigned char *hl = r->hl + B->coloff;
+            int sel_start = -1, sel_end = -1;
+            editorGetSelectionRange(B, filerow, &sel_start, &sel_end);
+            int in_sel = 0;
 
             int current_color = -1;
             for (int j = 0; j < len; j++) {
+                int rx = B->coloff + j;
+                int is_sel = (sel_start >= 0 && rx >= sel_start && rx < sel_end);
+                if (is_sel != in_sel) {
+                    if (is_sel) abAppend(&ab, "\x1b[7m", 4);
+                    else abAppend(&ab, "\x1b[27m", 5);
+                    in_sel = is_sel;
+                }
                 if (hl[j] == HL_NONPRINT) {
                     char sym = (c[j] <= 26) ? (char)('@' + c[j]) : '?';
                     abAppend(&ab, "\x1b[7m", 4);
                     abAppend(&ab, &sym, 1);
                     abAppend(&ab, "\x1b[0m", 4);
+                    if (in_sel) abAppend(&ab, "\x1b[7m", 4);
                     if (current_color != -1) {
                         char buf[16];
                         int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", current_color);
@@ -2086,6 +2176,7 @@ static void editorRefreshScreen(void) {
                     abAppend(&ab, c + j, 1);
                 }
             }
+            if (in_sel) { abAppend(&ab, "\x1b[27m", 5); in_sel = 0; }
             abAppend(&ab, "\x1b[39m", 5);
             abAppend(&ab, "\x1b[0K", 4);
             abAppend(&ab, "\r\n", 2);
@@ -2558,13 +2649,23 @@ static void editorProcessKeypress(int fd) {
 
     editorBuffer *B = curBuf();
     if (!B) return;
-
+    if (c != CTRL_A && c != CTRL_C) editorClearSelection(B);
     switch (c) {
         case ENTER:
             editorInsertNewlineWithHistory(B);
             break;
 
         case CTRL_C:
+            editorCopySelection(B);
+            break;
+
+        case CTRL_A:
+            B->sel_anchor_cy = 0;
+            B->sel_anchor_cx = 0;
+            if (B->numrows > 0) {
+                B->cy = B->numrows - 1;
+                B->cx = B->row[B->cy].size;
+            }
             break;
 
         case CTRL_Q:
