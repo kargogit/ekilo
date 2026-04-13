@@ -57,6 +57,7 @@ eKilo is a heavily enhanced fork of [antirez/kilo](https://github.com/antirez/ki
 | `Ctrl-Z` / `Ctrl-Y`    | Undo / Redo (smart merging of typing)               |
 | `Ctrl-H`               | Delete current line                                 |
 | `Ctrl-A`               | Select all                                          |
+| `Ctrl-Shift-Arrow Keys`| Text Selection			               |
 | `Ctrl-C`               | Copy selection to system clipboard                  |
 
 ### Search & Replace
