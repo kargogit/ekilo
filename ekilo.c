@@ -2297,31 +2297,8 @@ static void editorInsertTextWithHistory(editorBuffer *B, const char *ins, int in
 
 static void editorInsertCharAutoPairWithHistory(editorBuffer *B, int c) {
     if (!B) return;
-
-    int close_char = editorFindCloseChar(c);
-
-    int ok = 0;
-    if (!E.paste_mode && close_char) {
-        if (B->cy >= B->numrows) ok = 1;
-        else {
-            erow *row = &B->row[B->cy];
-            if (B->cx >= row->size) ok = 1;
-            else {
-                char next = row->chars[B->cx];
-                if (isspace((unsigned char)next) || strchr(",.()+-/*=~%[];{}<>", next)) ok = 1;
-            }
-        }
-    }
-
-    if (ok) {
-        char s[2] = { (char)c, (char)close_char };
-        editorInsertTextWithHistory(B, s, 2);
-        B->cx--; /* between pair */
-        editorScroll();
-    } else {
-        char s[1] = { (char)c };
-        editorInsertTextWithHistory(B, s, 1);
-    }
+    char s[1] = { (char)c };
+    editorInsertTextWithHistory(B, s, 1);
 }
 
 static void editorInsertNewlineWithHistory(editorBuffer *B) {
