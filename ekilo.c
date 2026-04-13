@@ -150,6 +150,10 @@ enum KEY_ACTION {
     ARROW_RIGHT,
     ARROW_UP,
     ARROW_DOWN,
+    CTRL_SHIFT_ARROW_LEFT,
+    CTRL_SHIFT_ARROW_RIGHT,
+    CTRL_SHIFT_ARROW_UP,
+    CTRL_SHIFT_ARROW_DOWN,
     DEL_KEY,
     HOME_KEY,
     END_KEY,
@@ -314,6 +318,22 @@ static int editorReadKey(int fd) {
         if (seq[0] == '[') {
             if (seq[1] >= '0' && seq[1] <= '9') {
                 if (read(fd, &seq[2], 1) == 0) return ESC;
+                /* Handle modifier sequences like [1;6A (Ctrl+Shift+Arrow) */
+                if (seq[1] == '1' && seq[2] == ';') {
+                    if (read(fd, &seq[3], 1) == 0) return ESC;
+                    if (read(fd, &seq[4], 1) == 0) return ESC;
+
+                    /* Modifier 6 = Ctrl+Shift */
+                    if (seq[3] == '6') {
+                        switch (seq[4]) {
+                            case 'A': return CTRL_SHIFT_ARROW_UP;
+                            case 'B': return CTRL_SHIFT_ARROW_DOWN;
+                            case 'C': return CTRL_SHIFT_ARROW_RIGHT;
+                            case 'D': return CTRL_SHIFT_ARROW_LEFT;
+                        }
+                    }
+                    return ESC;
+                }
                 if (seq[2] == '~') {
                     switch (seq[1]) {
                         case '3': return DEL_KEY;
@@ -2652,7 +2672,11 @@ static void editorProcessKeypress(int fd) {
 
     editorBuffer *B = curBuf();
     if (!B) return;
-    if (c != CTRL_A && c != CTRL_C) editorClearSelection(B);
+    if (c != CTRL_A && c != CTRL_C &&
+        c != CTRL_SHIFT_ARROW_LEFT && c != CTRL_SHIFT_ARROW_RIGHT &&
+        c != CTRL_SHIFT_ARROW_UP && c != CTRL_SHIFT_ARROW_DOWN) {
+        editorClearSelection(B);
+    }
     switch (c) {
         case ENTER:
             editorInsertNewlineWithHistory(B);
@@ -2778,6 +2802,28 @@ static void editorProcessKeypress(int fd) {
         case END_KEY:
             if (B->cy < B->numrows) B->cx = B->row[B->cy].size;
             break;
+
+        case CTRL_SHIFT_ARROW_UP:
+        case CTRL_SHIFT_ARROW_DOWN:
+        case CTRL_SHIFT_ARROW_LEFT:
+        case CTRL_SHIFT_ARROW_RIGHT: {
+            /* Start selection if not already active */
+            if (B->sel_anchor_cy < 0) {
+                B->sel_anchor_cy = B->cy;
+                B->sel_anchor_cx = B->cx;
+            }
+
+            /* Map to corresponding plain arrow movement */
+            int arrow_key;
+            switch (c) {
+                case CTRL_SHIFT_ARROW_UP:    arrow_key = ARROW_UP; break;
+                case CTRL_SHIFT_ARROW_DOWN:  arrow_key = ARROW_DOWN; break;
+                case CTRL_SHIFT_ARROW_LEFT:  arrow_key = ARROW_LEFT; break;
+                case CTRL_SHIFT_ARROW_RIGHT: arrow_key = ARROW_RIGHT; break;
+                default: arrow_key = ARROW_RIGHT; break;
+            }
+            editorMoveCursor(arrow_key);
+        } break;
 
         case ARROW_UP:
         case ARROW_DOWN:
