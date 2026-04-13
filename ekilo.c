@@ -752,8 +752,8 @@ static void bufferUpdateRx(editorBuffer *B) {
 static int editorLineNumberWidth(editorBuffer *B) {
     if (!E.show_line_numbers) return 0;
     int n = (B && B->numrows > 0) ? B->numrows : 1;
-    int w = digits10(n);
-    return w + 2; /* "NN " */
+    int d = digits10(n);
+    return d + 1; /* digits + trailing space */
 }
 
 static int editorTextCols(editorBuffer *B) {
@@ -1987,9 +1987,12 @@ static void editorRefreshScreen(void) {
             /* Line numbers gutter */
             if (E.show_line_numbers) {
                 char ln[64];
+                int w = lnw - 1;              /* digits width (lnw includes the trailing space) */
+                if (w < 0) w = 0;
+
                 if (filerow < B->numrows) {
                     int n = filerow + 1;
-                    int w = lnw - 2;
+
                     if (filerow == B->cy) abAppend(&ab, "\x1b[7m", 4);
                     else abAppend(&ab, "\x1b[90m", 5); /* dim */
 
@@ -2001,10 +2004,12 @@ static void editorRefreshScreen(void) {
                     abAppend(&ab, "\x1b[0m", 4);
                 } else {
                     abAppend(&ab, "\x1b[90m", 5);
-                    snprintf(ln, sizeof(ln), "%*s ", lnw - 2, "~");
+
+                    snprintf(ln, sizeof(ln), "%*s ", w, "~");
                     int l = (int)strlen(ln);
                     if (l > lnw) l = lnw;
                     abAppend(&ab, ln, l);
+
                     abAppend(&ab, "\x1b[0m", 4);
                 }
             }
