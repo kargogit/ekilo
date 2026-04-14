@@ -222,6 +222,8 @@ static int editorReadKey(int fd);
 static void updateWindowSize(void);
 static void editorAtExit(void);
 static void editorHelpModal(int startup);
+static int editorRowGetVisualHeight(erow *row, int textcols);
+static void editorGetVisualCoords(editorBuffer *B, int *vis_y, int *vis_x);
 
 static editorBuffer *curBuf(void) {
     if (E.numtabs <= 0) return NULL;
@@ -798,12 +800,33 @@ static void editorScroll(void) {
     bufferUpdateRx(B);
     int textcols = editorTextCols(B);
 
-    if (B->cy < B->rowoff) B->rowoff = B->cy;
-    if (B->cy >= B->rowoff + E.textrows) B->rowoff = B->cy - E.textrows + 1;
-
     if (E.word_wrap) {
-        B->coloff = 0;  // No horizontal scroll in word wrap mode
+        B->coloff = 0; /* No horizontal scroll in wrap mode */
+
+        /* Calculate visual position of cursor */
+        int vis_y, vis_x;
+        editorGetVisualCoords(B, &vis_y, &vis_x);
+
+        /* Adjust rowoff if cursor is off-screen */
+        if (vis_y < 0) {
+            /* Cursor is above screen: move rowoff up */
+            while (B->rowoff > 0) {
+                B->rowoff--;
+                editorGetVisualCoords(B, &vis_y, &vis_x);
+                if (vis_y >= 0) break;
+            }
+        } else if (vis_y >= E.textrows) {
+            /* Cursor is below screen: move rowoff down */
+            while (vis_y >= E.textrows && B->rowoff < B->cy) {
+                B->rowoff++;
+                editorGetVisualCoords(B, &vis_y, &vis_x);
+            }
+        }
     } else {
+        /* Standard scrolling logic for non-wrap mode */
+        if (B->cy < B->rowoff) B->rowoff = B->cy;
+        if (B->cy >= B->rowoff + E.textrows) B->rowoff = B->cy - E.textrows + 1;
+
         if (B->rx < B->coloff) B->coloff = B->rx;
         if (B->rx >= B->coloff + textcols) B->coloff = B->rx - textcols + 1;
     }
@@ -2093,6 +2116,39 @@ static void editorCopySelection(editorBuffer *B) {
     editorSetStatusMessage("Copied %d bytes", (int)(p - editor_clipboard));
 }
 
+/* ======================= Word Wrap Helpers ======================== */
+
+/* Returns how many screen rows a logical row occupies */
+static int editorRowGetVisualHeight(erow *row, int textcols) {
+    if (textcols <= 0) return 1;
+    if (row->rsize == 0) return 1;
+    return (row->rsize + textcols - 1) / textcols;
+}
+
+/* Computes visual screen coordinates (relative to rowoff) for the cursor */
+static void editorGetVisualCoords(editorBuffer *B, int *vis_y, int *vis_x) {
+    int textcols = editorTextCols(B);
+    int y = 0;
+
+    /* Sum heights of all rows from rowoff up to current row */
+    for (int i = B->rowoff; i < B->cy; i++) {
+        y += editorRowGetVisualHeight(&B->row[i], textcols);
+    }
+
+    /* Add offset within the current row based on rx */
+    int cur_vis_y = 0;
+    int cur_vis_x = B->rx;
+
+    if (textcols > 0) {
+        cur_vis_y = B->rx / textcols;
+        cur_vis_x = B->rx % textcols;
+    }
+
+    *vis_y = y + cur_vis_y;
+    *vis_x = cur_vis_x;
+}
+
+
 static void editorRefreshScreen(void) {
     editorBuffer *B = curBuf();
     if (!B) return;
@@ -2289,6 +2345,7 @@ static void editorRefreshScreen(void) {
     }
 
     /* cursor */
+    /* cursor */
     int cx = 1;
     int cy = 1;
 
@@ -2297,17 +2354,32 @@ static void editorRefreshScreen(void) {
         cx = 1;
     } else {
         int lnw = editorLineNumberWidth(B);
+        int vis_y, vis_x;
 
-        int screeny = (B->cy - B->rowoff);
-        if (screeny < 0) screeny = 0;
-        if (screeny >= E.textrows) screeny = E.textrows - 1;
-        cy = 1 /* tabbar */ + 1 /* 1-based */ + screeny;
+        if (E.word_wrap) {
+            /* Use visual coordinates */
+            editorGetVisualCoords(B, &vis_y, &vis_x);
 
-        int screenx = (B->rx - B->coloff);
-        if (screenx < 0) screenx = 0;
-        int textcols = editorTextCols(B);
-        if (screenx >= textcols) screenx = textcols - 1;
-        cx = 1 + lnw + screenx;
+            /* Clamp visual Y to screen bounds just in case */
+            if (vis_y < 0) vis_y = 0;
+            if (vis_y >= E.textrows) vis_y = E.textrows - 1;
+
+            cy = 2 + vis_y; /* 1 for tabbar + 1 for 1-based indexing */
+            cx = 1 + lnw + vis_x;
+        } else {
+            /* Original logic for non-wrap */
+            int screeny = (B->cy - B->rowoff);
+            if (screeny < 0) screeny = 0;
+            if (screeny >= E.textrows) screeny = E.textrows - 1;
+            cy = 2 + screeny;
+
+            int screenx = (B->rx - B->coloff);
+            if (screenx < 0) screenx = 0;
+            int textcols = editorTextCols(B);
+            if (screenx >= textcols) screenx = textcols - 1;
+            cx = 1 + lnw + screenx;
+        }
+
         if (cx < 1) cx = 1;
         if (cx > E.screencols) cx = E.screencols;
     }
