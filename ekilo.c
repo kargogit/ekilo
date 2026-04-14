@@ -799,40 +799,35 @@ static void editorScroll(void) {
 
     bufferUpdateRx(B);
     int textcols = editorTextCols(B);
+    if (textcols < 1) textcols = 1;
 
     if (E.word_wrap) {
         B->coloff = 0;
-        if (textcols < 1) textcols = 1;
 
-        /* Compute visual Y position of cursor */
-        int vis_y = 0;
-        for (int i = 0; i < B->cy; i++) {
-            vis_y += editorRowGetVisualHeight(&B->row[i], textcols);
-        }
-        vis_y += B->rx / textcols;
-
-        /* Scroll to make cursor visible */
-        if (vis_y < B->rowoff) {
-            B->rowoff = vis_y;
-        } else if (vis_y >= B->rowoff + E.textrows) {
-            B->rowoff = vis_y - E.textrows + 1;
-        }
-
-        /* Clamp rowoff */
-        int total_vis_rows = vis_y;
-        for (int i = B->cy + 1; i < B->numrows; i++) {
-            total_vis_rows += editorRowGetVisualHeight(&B->row[i], textcols);
-        }
-        if (B->rowoff > total_vis_rows - E.textrows) {
-            B->rowoff = total_vis_rows - E.textrows;
-        }
+        // Keep rowoff valid
         if (B->rowoff < 0) B->rowoff = 0;
+        if (B->rowoff > B->cy) B->rowoff = B->cy;
 
+        // Visual distance from top of screen to cursor
+        int vis = 0;
+        for (int i = B->rowoff; i < B->cy; i++)
+            vis += editorRowGetVisualHeight(&B->row[i], textcols);
+        vis += B->rx / textcols;
+
+        // Scroll DOWN until cursor fits
+        while (vis >= E.textrows && B->rowoff < B->numrows) {
+            vis -= editorRowGetVisualHeight(&B->row[B->rowoff], textcols);
+            B->rowoff++;
+        }
+        // Scroll UP if needed
+        while (vis < 0 && B->rowoff > 0) {
+            B->rowoff--;
+            vis += editorRowGetVisualHeight(&B->row[B->rowoff], textcols);
+        }
     } else {
-        /* Original non-wrapping logic */
+        // original non-wrap logic
         if (B->cy < B->rowoff) B->rowoff = B->cy;
         if (B->cy >= B->rowoff + E.textrows) B->rowoff = B->cy - E.textrows + 1;
-
         if (B->rx < B->coloff) B->coloff = B->rx;
         if (B->rx >= B->coloff + textcols) B->coloff = B->rx - textcols + 1;
     }
