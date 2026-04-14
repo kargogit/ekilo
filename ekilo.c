@@ -119,6 +119,7 @@ struct editorConfig {
     int last_key;
 
     int show_line_numbers;
+    int word_wrap;
 
     int help_active;
     int help_scroll;
@@ -800,8 +801,12 @@ static void editorScroll(void) {
     if (B->cy < B->rowoff) B->rowoff = B->cy;
     if (B->cy >= B->rowoff + E.textrows) B->rowoff = B->cy - E.textrows + 1;
 
-    if (B->rx < B->coloff) B->coloff = B->rx;
-    if (B->rx >= B->coloff + textcols) B->coloff = B->rx - textcols + 1;
+    if (E.word_wrap) {
+        B->coloff = 0;  // No horizontal scroll in word wrap mode
+    } else {
+        if (B->rx < B->coloff) B->coloff = B->rx;
+        if (B->rx >= B->coloff + textcols) B->coloff = B->rx - textcols + 1;
+    }
 }
 
 static void editorMoveCursor(int key) {
@@ -1948,6 +1953,7 @@ static void editorDrawHelpScreen(struct abuf *ab, int startup) {
         "",
         "View",
         "  Ctrl-\\             Toggle line numbers",
+        "  Ctrl-L             Toggle word wrap",
         "",
         "Notes",
         "  • Search highlights the current match in blue.",
@@ -2105,9 +2111,10 @@ static void editorRefreshScreen(void) {
         int lnw = editorLineNumberWidth(B);
         int textcols = editorTextCols(B);
 
-        for (int y = 0; y < E.textrows; y++) {
-            int filerow = B->rowoff + y;
+        int screen_y = 0;
+        int filerow = B->rowoff;
 
+        while (screen_y < E.textrows) {
             /* Line numbers gutter */
             if (E.show_line_numbers) {
                 char ln[64];
@@ -2139,7 +2146,7 @@ static void editorRefreshScreen(void) {
             }
 
             if (filerow >= B->numrows) {
-                if (B->numrows == 0 && y == E.textrows / 3) {
+                if (B->numrows == 0 && screen_y == E.textrows / 3) {
                     char welcome[128];
                     int welcomelen = snprintf(welcome, sizeof(welcome),
                         "eKilo editor -- version %s   (F1/Ctrl-/ help)", EKILO_VERSION);
@@ -2152,61 +2159,93 @@ static void editorRefreshScreen(void) {
                     abAppend(&ab, "~", 1);
                 }
                 abAppend(&ab, "\x1b[0K\r\n", 6);
+                screen_y++;
                 continue;
             }
 
             erow *r = &B->row[filerow];
-            int len = r->rsize - B->coloff;
-            if (len < 0) len = 0;
-            if (len > textcols) len = textcols;
 
-            char *c = r->render + B->coloff;
-            unsigned char *hl = r->hl + B->coloff;
-            int sel_start = -1, sel_end = -1;
-            editorGetSelectionRange(B, filerow, &sel_start, &sel_end);
-            int in_sel = 0;
+            // Word wrap: render line potentially across multiple screen rows
+            int wrap_offset = 0;
+            int rendered_lines = 0;
 
-            int current_color = -1;
-            for (int j = 0; j < len; j++) {
-                int rx = B->coloff + j;
-                int is_sel = (sel_start >= 0 && rx >= sel_start && rx < sel_end);
-                if (is_sel != in_sel) {
-                    if (is_sel) abAppend(&ab, "\x1b[7m", 4);
-                    else abAppend(&ab, "\x1b[27m", 5);
-                    in_sel = is_sel;
+            do {
+                int len = r->rsize - wrap_offset;
+                if (len < 0) len = 0;
+                if (len > textcols) len = textcols;
+
+                char *c = r->render + wrap_offset;
+                unsigned char *hl = r->hl + wrap_offset;
+                int sel_start = -1, sel_end = -1;
+                editorGetSelectionRange(B, filerow, &sel_start, &sel_end);
+                int in_sel = 0;
+
+                int current_color = -1;
+                for (int j = 0; j < len; j++) {
+                    int rx = wrap_offset + j;
+                    int is_sel = (sel_start >= 0 && rx >= sel_start && rx < sel_end);
+                    if (is_sel != in_sel) {
+                        if (is_sel) abAppend(&ab, "\x1b[7m", 4);
+                        else abAppend(&ab, "\x1b[27m", 5);
+                        in_sel = is_sel;
+                    }
+                    if (hl[j] == HL_NONPRINT) {
+                        char sym = (c[j] <= 26) ? (char)('@' + c[j]) : '?';
+                        abAppend(&ab, "\x1b[7m", 4);
+                        abAppend(&ab, &sym, 1);
+                        abAppend(&ab, "\x1b[0m", 4);
+                        if (in_sel) abAppend(&ab, "\x1b[7m", 4);
+                        if (current_color != -1) {
+                            char buf[16];
+                            int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", current_color);
+                            abAppend(&ab, buf, clen);
+                        }
+                    } else if (hl[j] == HL_NORMAL) {
+                        if (current_color != -1) {
+                            abAppend(&ab, "\x1b[39m", 5);
+                            current_color = -1;
+                        }
+                        abAppend(&ab, c + j, 1);
+                    } else {
+                        int color = editorSyntaxToColor(hl[j]);
+                        if (color != current_color) {
+                            char buf[16];
+                            int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
+                            abAppend(&ab, buf, clen);
+                            current_color = color;
+                        }
+                        abAppend(&ab, c + j, 1);
+                    }
                 }
-                if (hl[j] == HL_NONPRINT) {
-                    char sym = (c[j] <= 26) ? (char)('@' + c[j]) : '?';
-                    abAppend(&ab, "\x1b[7m", 4);
-                    abAppend(&ab, &sym, 1);
+                if (in_sel) { abAppend(&ab, "\x1b[27m", 5); in_sel = 0; }
+                abAppend(&ab, "\x1b[39m", 5);
+                abAppend(&ab, "\x1b[0K", 4);
+                abAppend(&ab, "\r\n", 2);
+
+                screen_y++;
+                rendered_lines++;
+                wrap_offset += len;
+
+                // Continue wrapping only if word wrap is enabled and there's more content
+                if (!E.word_wrap || wrap_offset >= r->rsize || screen_y >= E.textrows) {
+                    break;
+                }
+
+                // Draw continuation indicator for wrapped lines (line number column)
+                if (E.show_line_numbers && screen_y < E.textrows) {
+                    char ln[64];
+                    int w = lnw - 1;
+                    abAppend(&ab, "\x1b[90m", 5);
+                    snprintf(ln, sizeof(ln), "%*s ", w, ">");
+                    int l = (int)strlen(ln);
+                    if (l > lnw) l = lnw;
+                    abAppend(&ab, ln, l);
                     abAppend(&ab, "\x1b[0m", 4);
-                    if (in_sel) abAppend(&ab, "\x1b[7m", 4);
-                    if (current_color != -1) {
-                        char buf[16];
-                        int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", current_color);
-                        abAppend(&ab, buf, clen);
-                    }
-                } else if (hl[j] == HL_NORMAL) {
-                    if (current_color != -1) {
-                        abAppend(&ab, "\x1b[39m", 5);
-                        current_color = -1;
-                    }
-                    abAppend(&ab, c + j, 1);
-                } else {
-                    int color = editorSyntaxToColor(hl[j]);
-                    if (color != current_color) {
-                        char buf[16];
-                        int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
-                        abAppend(&ab, buf, clen);
-                        current_color = color;
-                    }
-                    abAppend(&ab, c + j, 1);
                 }
-            }
-            if (in_sel) { abAppend(&ab, "\x1b[27m", 5); in_sel = 0; }
-            abAppend(&ab, "\x1b[39m", 5);
-            abAppend(&ab, "\x1b[0K", 4);
-            abAppend(&ab, "\r\n", 2);
+
+            } while (E.word_wrap && wrap_offset < r->rsize && screen_y < E.textrows);
+
+            filerow++;
         }
     }
 
@@ -2315,6 +2354,7 @@ static void initEditor(void) {
     E.last_char_time.tv_usec = 0;
 
     E.show_line_numbers = 1;
+    E.word_wrap = 1;
 
     E.help_active = 0;
     E.help_scroll = 0;
@@ -2480,6 +2520,11 @@ static void editorGoToLine(void) {
 static void editorToggleLineNumbers(void) {
     E.show_line_numbers = !E.show_line_numbers;
     editorSetStatusMessage("Line numbers: %s", E.show_line_numbers ? "ON" : "OFF");
+}
+
+static void editorToggleWordWrap(void) {
+    E.word_wrap = !E.word_wrap;
+    editorSetStatusMessage("Word wrap: %s", E.word_wrap ? "ON" : "OFF");
 }
 
 /* ========================== Edits with history ============================ */
@@ -2842,6 +2887,10 @@ static void editorProcessKeypress(int fd) {
             editorToggleLineNumbers();
             break;
 
+        case CTRL_L:
+            editorToggleWordWrap();
+            break;
+
         case CTRL_Z:
             editorUndo(B);
             break;
@@ -2911,7 +2960,6 @@ static void editorProcessKeypress(int fd) {
             editorMoveCursor(c);
             break;
 
-        case CTRL_L:
         case ESC:
             break;
 
