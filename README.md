@@ -1,4 +1,4 @@
-# eKilo — 2.1.0
+# eKilo
 
 **A modern, fast, and delightful terminal text editor.**
 
@@ -6,7 +6,7 @@ eKilo is a heavily enhanced fork of [antirez/kilo](https://github.com/antirez/ki
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 - **Multi-tab interface** (`Ctrl-T`, `Ctrl-N`/`Ctrl-P`, `Ctrl-W`)
 - **Smart undo/redo** — merges consecutive typing, supports bulk operations via snapshots
