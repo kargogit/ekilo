@@ -801,29 +801,35 @@ static void editorScroll(void) {
     int textcols = editorTextCols(B);
 
     if (E.word_wrap) {
-        B->coloff = 0; /* No horizontal scroll in wrap mode */
+        B->coloff = 0;
+        if (textcols < 1) textcols = 1;
 
-        /* Calculate visual position of cursor */
-        int vis_y, vis_x;
-        editorGetVisualCoords(B, &vis_y, &vis_x);
-
-        /* Adjust rowoff if cursor is off-screen */
-        if (vis_y < 0) {
-            /* Cursor is above screen: move rowoff up */
-            while (B->rowoff > 0) {
-                B->rowoff--;
-                editorGetVisualCoords(B, &vis_y, &vis_x);
-                if (vis_y >= 0) break;
-            }
-        } else if (vis_y >= E.textrows) {
-            /* Cursor is below screen: move rowoff down */
-            while (vis_y >= E.textrows && B->rowoff < B->cy) {
-                B->rowoff++;
-                editorGetVisualCoords(B, &vis_y, &vis_x);
-            }
+        /* Compute visual Y position of cursor */
+        int vis_y = 0;
+        for (int i = 0; i < B->cy; i++) {
+            vis_y += editorRowGetVisualHeight(&B->row[i], textcols);
         }
+        vis_y += B->rx / textcols;
+
+        /* Scroll to make cursor visible */
+        if (vis_y < B->rowoff) {
+            B->rowoff = vis_y;
+        } else if (vis_y >= B->rowoff + E.textrows) {
+            B->rowoff = vis_y - E.textrows + 1;
+        }
+
+        /* Clamp rowoff */
+        int total_vis_rows = vis_y;
+        for (int i = B->cy + 1; i < B->numrows; i++) {
+            total_vis_rows += editorRowGetVisualHeight(&B->row[i], textcols);
+        }
+        if (B->rowoff > total_vis_rows - E.textrows) {
+            B->rowoff = total_vis_rows - E.textrows;
+        }
+        if (B->rowoff < 0) B->rowoff = 0;
+
     } else {
-        /* Standard scrolling logic for non-wrap mode */
+        /* Original non-wrapping logic */
         if (B->cy < B->rowoff) B->rowoff = B->cy;
         if (B->cy >= B->rowoff + E.textrows) B->rowoff = B->cy - E.textrows + 1;
 
