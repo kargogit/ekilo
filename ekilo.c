@@ -2452,15 +2452,32 @@ static void editorAtExit(void) {
 }
 
 /* =============================== Commands ================================= */
-static char *editorOpenFileMenuDialog(void) {
+static char *editorFileMenuDialog(const char *title, const char *initial_path) {
     char start[PATH_MAX];
-    if (!getcwd(start, sizeof(start))) {
+
+    if (initial_path && *initial_path) {
+        snprintf(start, sizeof(start), "%s", initial_path);
+    } else if (!getcwd(start, sizeof(start))) {
         snprintf(start, sizeof(start), "./");
     }
-    size_t sl = strlen(start);
-    if (sl > 0 && start[sl - 1] != '/' && sl + 1 < sizeof(start)) {
-        start[sl] = '/';
-        start[sl + 1] = '\0';
+
+    /* If start is a directory, ensure trailing '/' (dialog expects that). */
+    int is_dir = 0;
+    if (!initial_path || !*initial_path) {
+        is_dir = 1;
+    } else {
+        struct stat st;
+        if (stat(start, &st) == 0 && S_ISDIR(st.st_mode)) is_dir = 1;
+        size_t sl0 = strlen(start);
+        if (sl0 && start[sl0 - 1] == '/') is_dir = 1;
+    }
+
+    if (is_dir) {
+        size_t sl = strlen(start);
+        if (sl > 0 && start[sl - 1] != '/' && sl + 1 < sizeof(start)) {
+            start[sl] = '/';
+            start[sl + 1] = '\0';
+        }
     }
 
     int pfd[2];
@@ -2477,21 +2494,19 @@ static char *editorOpenFileMenuDialog(void) {
     }
 
     if (pid == 0) {
-        /* child: dialog writes selection to stdout -> pipe */
         dup2(pfd[1], STDOUT_FILENO);
         close(pfd[0]);
         close(pfd[1]);
 
         execlp("dialog", "dialog",
                "--stdout",
-               "--title", "Open file",
+               "--title", (title && *title) ? title : "Select file",
                "--fselect", start,
                "20", "80",
                (char *)NULL);
-        _exit(127); /* dialog not found */
+        _exit(127);
     }
 
-    /* parent: read selected path */
     close(pfd[1]);
 
     char out[PATH_MAX + 1];
@@ -2508,11 +2523,10 @@ static char *editorOpenFileMenuDialog(void) {
 
     enableRawMode(STDIN_FILENO);
 
-    /* clean up dialog screen artifacts */
     write(STDOUT_FILENO, "\x1b[2J\x1b[H", 7);
     updateWindowSize();
 
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return NULL; /* cancel/ESC/not found */
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return NULL;
     if (len <= 0) return NULL;
 
     out[len] = '\0';
@@ -2520,6 +2534,10 @@ static char *editorOpenFileMenuDialog(void) {
     if (!out[0]) return NULL;
 
     return xstrdup(out);
+}
+
+static char *editorOpenFileMenuDialog(void) {
+    return editorFileMenuDialog("Open file", NULL);
 }
 
 static void editorOpenPromptNewTab(void) {
@@ -2539,8 +2557,10 @@ static void editorSaveCurrent(void) {
     if (!B) return;
 
     if (!B->filename) {
-        char *fname = editorPrompt("Save as: %s  (ESC cancels)", NULL);
+        char *fname = editorFileMenuDialog("Save file", NULL);
+        if (!fname) fname = editorPrompt("Save as: %s  (ESC cancels)", NULL);
         if (!fname) { editorSetStatusMessage("Save aborted"); return; }
+
         if (bufferSaveToFilename(B, fname) != 0)
             editorSetStatusMessage("Can't save: %s", strerror(errno));
         free(fname);
